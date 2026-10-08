@@ -2,6 +2,7 @@
 // we shouldn't want to edit the raw state most of the time, helper functions are better
 import * as Types from '../actions/types';
 import { currentOffset } from '.';
+import { hasMediaClock } from './mediaClock';
 
 export function reducer(_state, action) {
   let state = { ..._state };
@@ -11,10 +12,12 @@ export function reducer(_state, action) {
   }
   switch (action.type) {
     case Types.ACTION_SEEK:
+      if (!Number.isFinite(action.offset)) break;
       state = {
         ...state,
-        offset: action.offset,
+        offset: Math.max(0, Math.min(action.offset, state.currentRoute?.duration ?? Infinity)),
         startTime: Date.now(),
+        seekVersion: (state.seekVersion || 0) + 1,
       };
 
       if (loopOffset !== null) {
@@ -52,6 +55,12 @@ export function reducer(_state, action) {
       } else {
         state.loop = null;
       }
+      state.offset = currentOffset(_state);
+      if (state.loop) {
+        state.offset = Math.max(action.start, Math.min(state.offset, action.end));
+      }
+      state.startTime = Date.now();
+      state.seekVersion = (state.seekVersion || 0) + 1;
       break;
     case Types.ACTION_BUFFER_VIDEO:
       state = {
@@ -68,25 +77,15 @@ export function reducer(_state, action) {
         isBufferingVideo: true,
         offset: 0,
         startTime: Date.now(),
+        seekVersion: (state.seekVersion || 0) + 1,
       };
       break;
     default:
       break;
   }
 
-  if (state.currentRoute && state.currentRoute.videoStartOffset && state.loop && state.zoom
-    && state.loop.startTime === state.zoom.start && state.zoom.start === 0) {
-    const loopRouteOffset = state.loop.startTime - state.zoom.start;
-    if (state.currentRoute.videoStartOffset > loopRouteOffset) {
-      state.loop = {
-        startTime: state.zoom.start + state.currentRoute.videoStartOffset,
-        duration: state.loop.duration - (state.currentRoute.videoStartOffset - loopRouteOffset),
-      };
-    }
-  }
-
   // normalize over loop
-  if (state.offset !== null && state.loop?.startTime) {
+  if (!hasMediaClock(state) && state.offset !== null && state.loop?.startTime != null && state.loop.duration > 0) {
     const playSpeed = state.isBufferingVideo ? 0 : state.desiredPlaySpeed;
     const offset = state.offset + (Date.now() - state.startTime) * playSpeed;
     loopOffset = state.loop.startTime;
